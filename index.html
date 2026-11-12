@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>언덕 위 천문대 — 360° 실시간 밤하늘 가상공간</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      overflow: hidden; background: #03050a;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #f1f5f9; user-select: none;
+    }
+    canvas { display: block; cursor: grab; }
+    canvas:active { cursor: grabbing; }
+
+    /* 좌측 상단 컨트롤 HUD */
+    #hud {
+      position: fixed; top: 16px; left: 16px; z-index: 10;
+      background: rgba(10, 15, 28, 0.75); backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px;
+      padding: 16px 18px; width: 320px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+    #hud h1 { font-size: 1.05rem; font-weight: 700; margin-bottom: 4px; color: #7dd3fc; letter-spacing: -0.02em; }
+    #hud p.sub { font-size: 0.8rem; color: #94a3b8; margin-bottom: 14px; }
+    .control-group { margin-bottom: 14px; }
+    .control-group label { display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 6px; color: #cbd5e1; }
+    input[type="range"] { width: 100%; accent-color: #38bdf8; cursor: pointer; }
+    .btn-row { display: flex; gap: 8px; }
+    button {
+      flex: 1; padding: 8px 10px; font-size: 0.8rem; font-weight: 600;
+      border-radius: 8px; border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(30, 41, 59, 0.85); color: #f8fafc; cursor: pointer;
+      transition: all 0.2s;
+    }
+    button:hover { background: rgba(56, 189, 248, 0.25); }
+    button.active { background: #0284c7; border-color: #38bdf8; }
+
+    /* 우측 상단 오늘의 우주쇼 및 천체 카드 */
+    #event-card {
+      position: fixed; top: 16px; right: 16px; z-index: 10;
+      background: rgba(10, 15, 28, 0.75); backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px;
+      padding: 16px 18px; width: 300px; font-size: 0.82rem;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+    #event-card h2 { font-size: 0.92rem; color: #fbbf24; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+    #event-card ul { padding-left: 16px; color: #e2e8f0; line-height: 1.55; }
+    #event-card li { margin-bottom: 4px; }
+    .highlight-event {
+      margin-top: 10px; padding: 10px; border-radius: 8px;
+      background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.3);
+      font-size: 0.78rem; color: #fde68a; line-height: 1.45;
+    }
+
+    /* 마우스 호버 천체 툴팁 */
+    #tooltip {
+      position: fixed; pointer-events: none; z-index: 20;
+      background: rgba(8, 12, 24, 0.88); backdrop-filter: blur(8px);
+      border: 1px solid rgba(125, 211, 252, 0.45); border-radius: 10px;
+      padding: 8px 12px; font-size: 0.8rem; color: #f8fafc;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+      transform: translate(14px, 14px); display: none; min-width: 150px;
+    }
+    #tooltip .t-title { font-weight: 700; color: #38bdf8; font-size: 0.88rem; margin-bottom: 2px; }
+    #tooltip .t-sub { font-size: 0.74rem; color: #94a3b8; }
+
+    /* 하단 조작 안내 */
+    #instructions {
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+      background: rgba(10, 15, 28, 0.6); backdrop-filter: blur(6px);
+      padding: 6px 14px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1);
+      font-size: 0.78rem; color: rgba(255, 255, 255, 0.75); pointer-events: none;
+    }
+  </style>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
+</head>
+<body>
+
+  <div id="hud">
+    <h1>언덕 위 천문대 (성남/서울 기준)</h1>
+    <p class="sub" id="time-display">시간 계산 중...</p>
+
+    <div class="control-group">
+      <label>
+        <span>시간 탐색 (현재 기준)</span>
+        <span id="offset-val">+0.0시간</span>
+      </label>
+      <input type="range" id="time-slider" min="-12" max="12" step="0.1" value="0" />
+    </div>
+
+    <div class="btn-row">
+      <button id="toggle-constellations" class="active">별자리 선: 켜짐</button>
+      <button id="toggle-compass" class="active">방위 표식: 켜짐</button>
+      <button id="reset-time">현재 시각</button>
+    </div>
+  </div>
+
+  <div id="event-card">
+    <h2>✨ 오늘의 밤하늘 & 우주쇼</h2>
+    <ul id="event-list">
+      <li>천체 위치 계산 중...</li>
+    </ul>
+    <div class="highlight-event" id="astro-highlight">
+      🌠 <strong>사자자리 유성우 활동기</strong><br/>
+      자정 이후 동쪽 하늘이 높아지면서 육안 관측 조건이 좋아집니다. 슬라이더를 밤 시간대로 옮겨보세요!
+    </div>
+  </div>
+
+  <div id="tooltip">
+    <div class="t-title" id="tt-name">천체 이름</div>
+    <div class="t-sub" id="tt-desc">상세 정보</div>
+  </div>
+
+  <div id="instructions">마우스 드래그: 360° 전방위 둘러보기 • 휠 스크롤: 시야 줌 • 천체에 커서 올리기: 정보 확인</div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // =========================================================
+    // 1. 관측자 위치 설정 (경기도 성남시 / 서울 인근)
+    // =========================================================
+    const OBSERVER_LAT = 37.42;
+    const OBSERVER_LON = 127.12;
+    const OBSERVER_ELEV = 120;
+    const SKY_RADIUS = 950;
+
+    const observer = new Astronomy.Observer(OBSERVER_LAT, OBSERVER_LON, OBSERVER_ELEV);
+    let baseDate = new Date();
+    let hourOffset = 0;
+
+    // =========================================================
+    // 2. THREE.JS 씬 & 360도 1인칭 카메라 설정
+    // =========================================================
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x0a101d, 0.0014);
+
+    const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 2200);
+    // 언덕 꼭대기 눈높이 위치
+    camera.position.set(0, 6.8, 0.1);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
+    document.body.appendChild(renderer.domElement);
+
+    // 360도 자유 회전 (카메라 위치 중심 회전)
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 6.9, 0); // 카메라 바로 앞을 타겟으로 두어 제자리에서 360도 회전
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+    controls.rotateSpeed = -0.45; // 1인칭 시점처럼 드래그 방향과 시선 일치
+    controls.enableZoom = false;   // 줌은 FOV(화각) 조절로 구현하여 360도 시점 유지
+    controls.enablePan = false;
+    controls.minPolarAngle = 0.05; // 천정(하늘 꼭대기)까지 볼 수 있음
+    controls.maxPolarAngle = Math.PI * 0.54; // 발밑 언덕 능선까지 볼 수 있음
+
+    // 마우스 휠로 망원경처럼 화각(FOV) 줌 인/아웃 (25° ~ 85°)
+    window.addEventListener('wheel', (e) => {
+      camera.fov = THREE.MathUtils.clamp(camera.fov + e.deltaY * 0.03, 25, 85);
+      camera.updateProjectionMatrix();
+    }, { passive: true });
+
+    // =========================================================
+    // 3. 육안 느낌의 글로우(빛번짐) 텍스처 생성기
+    // =========================================================
+    function createGlowTexture(innerColor, midColor, outerColor) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      grad.addColorStop(0.0, innerColor);
+      grad.addColorStop(0.25, midColor);
+      grad.addColorStop(0.6, outerColor);
+      grad.addColorStop(1.0, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 128, 128);
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    const starGlowTex = createGlowTexture(
+      'rgba(255, 255, 255, 1.0)',
+      'rgba(255, 250, 235, 0.55)',
+      'rgba(180, 210, 255, 0.12)'
+    );
+    const sunGlowTex = createGlowTexture(
+      'rgba(255, 255, 240, 1.0)',
+      'rgba(255, 220, 130, 0.65)',
+      'rgba(255, 160, 50, 0.15)'
+    );
+    const moonGlowTex = createGlowTexture(
+      'rgba(255, 255, 255, 0.95)',
+      'rgba(210, 225, 245, 0.45)',
+      'rgba(150, 180, 220, 0.08)'
+    );
+
+    // =========================================================
+    // 4. 탁 트인 언덕 지형 & 방위 표식(동/서/남/북)
+    // =========================================================
+    function createHillTerrain() {
+      const geo = new THREE.PlaneGeometry(800, 800, 120, 120);
+      geo.rotateX(-Math.PI / 2);
+
+      const pos = geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        const dist = Math.sqrt(x * x + z * z);
+
+        // 중앙 언덕 정상에서 사방으로 완만하게 내려가는 구릉 지형
+        const hillHeight = 5.2 * Math.exp(-(dist * dist) / (2 * 70 * 70));
+        const rolling = Math.sin(x * 0.025) * Math.cos(z * 0.025) * 1.6;
+        pos.setY(i, hillHeight + rolling);
+      }
+      geo.computeVertexNormals();
+
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x162b1e,
+        roughness: 0.95,
+        metalness: 0.02,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      scene.add(mesh);
+    }
+    createHillTerrain();
+
+    // 동서남북(N, E, S, W) 지평선 방위 표식 스프라이트
+    const compassGroup = new THREE.Group();
+    scene.add(compassGroup);
+
+    function addCompassLabel(text, azDeg, color = '#94a3b8') {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128; canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.font = 'bold 28px Pretendard, sans-serif';
+      ctx.fillStyle = color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, 64, 32);
+
+      const tex = new THREE.CanvasTexture(canvas);
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.75 }));
+      const pos = altAzToVector3(1.5, azDeg, 180);
+      sprite.position.copy(pos);
+      sprite.scale.set(16, 8, 1);
+      compassGroup.add(sprite);
+    }
+    addCompassLabel('북 (N)', 0, '#f87171');
